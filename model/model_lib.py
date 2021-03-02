@@ -6,107 +6,146 @@ Created on Thu Feb 13 10:35:16 2020
 @author: aroman
 """
 
-import numpy as np
 from scipy import optimize
-from scipy import interpolate
-import matplotlib.pyplot as plt
-import time 
+import numpy as np
 
-def ps_analytic(t,R3,T1,phi,a,b,c,d,pd0,ps0):
-    ps = -R3 + (-R3 - pd0 + (R3 + ps0)*(T1 + a - phi + 1)/2) * np.exp(t*(b - c))/a + (2*R3 + 2*a*(R3 + ps0) + 2*pd0 - (R3 + ps0)*(T1 + a - phi + 1)) * np.exp(t*(b + c))/(2*a)
-    return  ps
+def Onechamber(V,beta,taustaud,Phi,a,l,mu,S,alpha,rhog):
+    k = 1. / beta
+    R5Samp =0               #Parameter inherited from old scaling of the equations. Must be equal to zero with the current scaling.    
+    #Scaling
+    Psi = rhog * V /(k*S)
+    xstar = taustaud * V / (k * S)
+    tstar =  8 * mu * l / (3.14 * a**4)
+    dt = 0.05 #dt appproximately 20th of the shortest timescale
+    N_cycles =int(((1 + Psi)/ (4 * alpha * Psi) * Phi))
+    epsilon = 4 * alpha / Phi
+    p_base = []
+    x_base = []
+    t_base = []
+    tcounter = 0
+    p0 =   4 * alpha /(1 + Psi)
+    for i in range(1, N_cycles ):
+        tslip =  np.log((N_cycles * (1 +  epsilon) - i) / (N_cycles - i ))
+        N = int(tslip / dt)
+        tsegment = np.linspace(0,tslip,N)
+        psegment = (p0 + Phi) *  np.exp(-tsegment) - Phi
+        x_base.append(4 * alpha / (1 + Psi) * i * np.ones(len((tsegment))))
+        p_base.append(psegment)
+        t_base.append(tsegment + tcounter)
+        p0 =   + 4 * alpha / (1 + Psi) -4 * alpha * Psi /(1 + Psi) * i
+        tcounter = tcounter + tslip
+    x = np.concatenate(x_base)
+    p = np.concatenate((p_base)) 
+    t = np.concatenate((t_base)) 
+    
+   
+    xPiston = x * xstar
+    p = p * taustaud
+    t = t * tstar
+    ptpd = Phi * taustaud
+    q = 3.14 * a**4 / (8 * mu * l) * (p + ptpd)
+    Vcum = 0
+    dt = np.diff(t) 
+    VErupted = np.zeros(len(dt))
+    for i in range(len(dt)):
+        Vcum = Vcum + 0.5 * (q[i] + q[i+1]) * dt[i]
+        VErupted[i] = Vcum
+    
+    return t,p,xPiston,VErupted
+    
 
-def pd_analytic(t,R3,T1,phi,a,b,c,d,pd0,ps0):
-    pd = -R3 + (-c + d)*(-R3 - pd0 + (R3 + ps0)*(T1 + a - phi + 1)/2) * np.exp(t*(b - c))/a + (c + d)*(2*R3 + 2*a*(R3 + ps0) + 2*pd0 - (R3 + ps0)*(T1 + a - phi + 1)) * np.exp(t*(b + c))/(2*a)
-    return pd
+def p_feeder(t,R3,Gamma,Theta,a,b,c,d,pCollapse0,ps0):
+    pFeeder = -R3 + (-R3 - pCollapse0 + (R3 + ps0)*(Gamma + a - Theta + 1)/2) * np.exp(t*(b - c))/a + (2*R3 + 2*a*(R3 + ps0) + 2*pCollapse0 - (R3 + ps0)*(Gamma + a - Theta + 1)) * np.exp(t*(b + c))/(2*a)
+    return  pFeeder
 
-def pd_analytic_root(t,R3,T1,phi,a,b,c,d,pd0,ps0,pslip):
-    ps_root = -R3 + (-c + d)*(-R3 - pd0 + (R3 + ps0)*(T1 + a - phi + 1)/2) * np.exp(t*(b - c))/a + (c + d)*(2*R3 + 2*a*(R3 + ps0) + 2*pd0 - (R3 + ps0)*(T1 + a - phi + 1)) * np.exp(t*(b + c))/(2*a) - pslip
-    return  ps_root
+def p_nonfeeder(t,R3,Gamma,Theta,a,b,c,d,pCollapse0,ps0):
+    pNonFeeder = -R3 + (-c + d)*(-R3 - pCollapse0 + (R3 + ps0)*(Gamma + a - Theta + 1)/2) * np.exp(t*(b - c))/a + (c + d)*(2*R3 + 2*a*(R3 + ps0) + 2*pCollapse0 - (R3 + ps0)*(Gamma + a - Theta + 1)) * np.exp(t*(b + c))/(2*a)
+    return pNonFeeder
+
+def p_nonfeeder_root(t,R3,Gamma,Theta,a,b,c,d,pCollapse0,ps0,pslip):
+    pNonFeederRoot = -R3 + (-c + d)*(-R3 - pCollapse0 + (R3 + ps0)*(Gamma + a - Theta + 1)/2) * np.exp(t*(b - c))/a + (c + d)*(2*R3 + 2*a*(R3 + ps0) + 2*pCollapse0 - (R3 + ps0)*(Gamma + a - Theta + 1)) * np.exp(t*(b + c))/(2*a) - pslip
+    return  pNonFeederRoot
 
 
-def TwoChambers_LF(w0,par,pslip,tslip):
-    ps0,pd0 = w0
-    r1,r3,r5,t1,phi,a,b,c,d = par
-    tslip = optimize.brentq(pd_analytic_root,0,1e+13, args = (r3,t1,phi,a,b,c,d,pd0,ps0,pslip))
-    tsegment = np.linspace(0,tslip,50)
-    pssegment = ps_analytic(tsegment,r3,t1,phi,a,b,c,d,pd0,ps0)
-    pdsegment = pd_analytic(tsegment,r3,t1,phi,a,b,c,d,pd0,ps0)
-    psend = pssegment[-1]
-    return tsegment,tslip,pssegment,pdsegment,psend
+def segments_LF(w0,par,pslip,tslip,dt):
+    pd0,pCollapse0 = w0
+    r1,r3,r5,Gamma,Theta,a,b,c,d = par
+    tslip = optimize.brentq(p_nonfeeder_root,0,1e+13, args = (r3,Gamma,Theta,a,b,c,d,pCollapse0,pd0,pslip))
+    N = int(tslip / dt)
+    tsegment = np.linspace(0,tslip,N)
+    pdsegment = p_feeder(tsegment,r3,Gamma,Theta,a,b,c,d,pCollapse0,pd0)
+    pssegment = p_nonfeeder(tsegment,r3,Gamma,Theta,a,b,c,d,pCollapse0,pd0)
+    pdend = pdsegment[-1]
+    return tsegment,tslip,pssegment,pdsegment,pdend
 
 
     
  
 
-def Twochambers_syntethic_LF(VsSamp,VdSamp,betadSamp,pspdSamp,R3Samp,condsSamp,conddSamp,ls,ld,mu,S,rhog):
-    alphaSamp = 1
-    kdSamp = 1 / betadSamp 
-    R5Samp =0
-    ksSamp = kdSamp
-    R1Samp = rhog * VdSamp /(kdSamp*S)
-    T1 = (condsSamp / conddSamp )**4 * ld /ls
-    PHI = kdSamp /kdSamp * VsSamp / VdSamp
-    params = [T1,PHI,R3Samp] 
-    tstar = VsSamp * 8 * mu * ld / (ksSamp * 3.14 * conddSamp**4)
-    xstar = pspdSamp * VdSamp / (kdSamp * S)
-
-    A = np.sqrt(T1**2 - 2*T1*PHI + 2*T1 + PHI**2 + 2*PHI + 1)
-    B = -T1/2 - PHI/2 - 1./2
-    C =  np.sqrt(4*PHI + (-T1 + PHI - 1)**2)/2    
-    D = T1/2 - PHI /2 + 1./2
-    params = [R1Samp,R3Samp,R5Samp,T1,PHI,A,B,C,D]
-    
-    PD0 =   4 * alphaSamp /(1 + R1Samp)
-    PSLIP = - 4 * alphaSamp * R1Samp * (1 - R5Samp)/(1 + R1Samp)
+def Twochambers_LF(VDeep,VShallow,betaDeep,betaShallow,taustaud,PD0,Phi,ae,ac,le,lc,mu,S,alpha,rhog):
+    kShallow = 1. / betaShallow
+    kDeep = 1. / betaDeep
+    R5Samp =0               #Parameter inherited from old scaling of the equations. Must be equal to zero with the current scaling.    
+    #Scaling
+    Psi = rhog * VShallow /(kShallow*S)
+    Psi_bulk = rhog * (VShallow + VDeep) /(kShallow*S)
+    Gamma = (ae /ac  )**4 * lc /le
+    Theta = kShallow /kDeep * VDeep / VShallow
+    tstar = VDeep * 8 * mu * lc / (kDeep * 3.14 * ac**4)
+    xstar = taustaud * VShallow / (kShallow * S)
+    A = np.sqrt(Gamma**2 - 2*Gamma*Theta + 2*Gamma + Theta**2 + 2*Theta + 1)
+    B = -Gamma/2 - Theta/2 - 1./2
+    C =  np.sqrt(4*Theta + (-Gamma + Theta - 1)**2)/2    
+    D = Gamma/2 - Theta /2 + 1./2
+    params = [Psi,Phi,R5Samp,Gamma,Theta,A,B,C,D]
+    timescale1 = 1. / (A - B)
+    timescale2 = 1. / (A + B)
+    dt = min(timescale1,timescale2) / 20 #dt appproximately 20th of the shortest timescale
+    pCollapse0 =   4 * alpha /(1 + Psi)
+    PSLIP = - 4 * alpha * Psi * (1 - R5Samp)/(1 + Psi)
     TSLIP = 0
-    PS0 = 0
-    w0 = np.array([PS0,PD0])
-    TSLIP = 0
-    N_cycles =int(((1 + R1Samp)/ (4 * alphaSamp * R1Samp) * R3Samp))
+    w0 = np.array([PD0,pCollapse0])
+    N_cycles =int(((1 + Psi)/ (4 * alpha * Psi) * Phi)) 
     i  = 1
     t_base = []
     ps_base = []
     pd_base = []
+    x_base = []
     tcounter = 0
-    Ncrit = int(0.6 * N_cycles)
-    print(N_cycles)
     for i in range(1,N_cycles + 1):
-        tseg,tslip,PS,PD,ps0 = TwoChambers_LF(w0,params,PSLIP,TSLIP)
+        tseg,tslip,PS,PD,PD0 = segments_LF(w0,params,PSLIP,TSLIP,dt)
+        x_base.append(4 * alpha / (1 + Psi) * i * np.ones(len((tseg))))
         ps_base.append(PS)
         pd_base.append(PD)
         t_base.append(tseg + tcounter)
-        PD0 =   + 4 * alphaSamp / (1 + R1Samp) -4 * alphaSamp * R1Samp * (1 - R5Samp)/(1 + R1Samp) * i
-        PS0 = ps0
-        PSLIP =  - 4 * alphaSamp * R1Samp * (1 - R5Samp)/(1 + R1Samp) * (i + 1)
-        w0 = np.array([PS0,PD0])
+        pCollapse0 =   + 4 * alpha / (1 + Psi) -4 * alpha * Psi * (1 - R5Samp)/(1 + Psi) * i
+        PSLIP =  - 4 * alpha * Psi * (1 - R5Samp)/(1 + Psi) * (i + 1)
+        w0 = np.array([PD0,pCollapse0])
         tcounter = tcounter + tslip
-        if i == Ncrit:
-            tcrit = tcounter
-
+    x = np.concatenate(x_base)
     pd = np.concatenate((pd_base)) 
     ps = np.concatenate((ps_base)) 
     t = np.concatenate((t_base)) 
-
-   
     
-    ps = ps * pspdSamp
-    pd = pd * pspdSamp
+   
+    x = x * xstar
+    ps = ps * taustaud
+    pd = pd * taustaud
     t = t * tstar
-    tcrit = tcrit * tstar
-    ptpd = R3Samp * pspdSamp
-    q = 3.14 * condsSamp**4 / (8 * mu * ls) * (ps + ptpd)
+    ptpd = Phi * taustaud
+    q = 3.14 * ae**4 / (8 * mu * le) * (pd + ptpd)
     Vcum = 0
     dt = np.diff(t) 
     V = np.zeros(len(dt))
-    tVolume = np.zeros(len(dt))
     
     for i in range(len(dt)):
         Vcum = Vcum + 0.5 * (q[i] + q[i+1]) * dt[i]
-        tVolume[i] = 0.5 * (t[i] + t[i + 1])
         V[i] = Vcum
-    tVolume = tVolume
-    return tVolume,V,t,ps,pd,q,tcrit
+    x = x[:-1]
+    ps = ps[:-1]
+    pd = pd[:-1]
+    t = t[:-1]
+    return t,ps,pd,x,V
 
 
 
